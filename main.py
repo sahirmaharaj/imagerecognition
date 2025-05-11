@@ -31,16 +31,42 @@ for path in [TRAIN_DIR, TEST_DIR, MODEL_DIR]:
 st.title("🧠 Image Classifier with Advanced Augmentation")
 
 # Sidebar: Upload Training Images
-st.sidebar.header("Image Classifier with Advanced Augmentation")
-files = st.sidebar.file_uploader("Upload training images", accept_multiple_files=True, type=["jpg", "jpeg", "png"])
+# Sidebar: Upload Training Images
+import re
+
+# Sidebar: Upload Training Images
+st.sidebar.header("1. Upload Training Images (e.g., Apple_1.jpg, Banana_2.jpg)")
+files = st.sidebar.file_uploader(
+    "Upload training images",
+    accept_multiple_files=True,
+    type=["jpg", "jpeg", "png"]
+)
+
 if files:
+    valid_files = 0
     for file in files:
-        label = file.name.split("_")[0]
-        label_folder = os.path.join(TRAIN_DIR, label)
-        os.makedirs(label_folder, exist_ok=True)
-        with open(os.path.join(label_folder, file.name), "wb") as f:
-            f.write(file.read())
-    st.sidebar.success("✅ Images uploaded and sorted!")
+        filename = file.name.strip()
+        name_part = os.path.splitext(filename)[0]  # remove .jpg/.png
+
+        # Extract alphanumeric prefix before "_" or use entire name if no underscore
+        label_match = re.match(r"([a-zA-Z0-9]+)", name_part)
+        if label_match:
+            label = label_match.group(1)
+            label_folder = os.path.join(TRAIN_DIR, label)
+            os.makedirs(label_folder, exist_ok=True)
+
+            # Replace spaces and invalid characters in filename
+            safe_filename = re.sub(r"[^\w\-_\.]", "_", filename)
+            with open(os.path.join(label_folder, safe_filename), "wb") as f:
+                f.write(file.read())
+            valid_files += 1
+        else:
+            st.warning(f"⚠️ Skipped invalid file: {filename}")
+
+    if valid_files > 0:
+        st.sidebar.success(f"✅ {valid_files} images uploaded and sorted by label!")
+    else:
+        st.sidebar.error("❗ No valid files uploaded.")
 
 # Sidebar: Model and Epoch selection
 framework = st.sidebar.selectbox("Choose Framework", ["PyTorch", "TensorFlow"])
