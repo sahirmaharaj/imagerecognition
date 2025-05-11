@@ -15,6 +15,7 @@ from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Input
+import re
 
 # Paths
 BASE_DIR = "streamlit_dual_model_app"
@@ -27,53 +28,49 @@ TF_MODEL_PATH = os.path.join(MODEL_DIR, "tf_model.h5")
 for path in [TRAIN_DIR, TEST_DIR, MODEL_DIR]:
     os.makedirs(path, exist_ok=True)
 
-# Streamlit Title
-st.title("🧠 Image Classifier with Advanced Augmentation")
+st.title("🧠 Image Classifier with Import/Export and Augmentation")
 
 # Sidebar: Upload Training Images
-# Sidebar: Upload Training Images
-import re
-
-# Sidebar: Upload Training Images
-st.sidebar.header("Image Classifier with Advanced Augmentation")
-files = st.sidebar.file_uploader(
-    "Upload training images",
-    accept_multiple_files=True,
-    type=["jpg", "jpeg", "png"]
-)
-
+st.sidebar.header("1. Upload Training Images")
+files = st.sidebar.file_uploader("Upload training images", accept_multiple_files=True, type=["jpg", "jpeg", "png"])
 if files:
     valid_files = 0
     for file in files:
         filename = file.name.strip()
-        name_part = os.path.splitext(filename)[0]  # remove .jpg/.png
-
-        # Extract alphanumeric prefix before "_" or use entire name if no underscore
+        name_part = os.path.splitext(filename)[0]
         label_match = re.match(r"([a-zA-Z0-9]+)", name_part)
         if label_match:
             label = label_match.group(1)
             label_folder = os.path.join(TRAIN_DIR, label)
             os.makedirs(label_folder, exist_ok=True)
-
-            # Replace spaces and invalid characters in filename
-            safe_filename = re.sub(r"[^\w\-_\.]", "_", filename)
+            safe_filename = re.sub(r"[^\w\-_.]", "_", filename)
             with open(os.path.join(label_folder, safe_filename), "wb") as f:
                 f.write(file.read())
             valid_files += 1
         else:
             st.warning(f"⚠️ Skipped invalid file: {filename}")
+    st.sidebar.success(f"✅ Uploaded and sorted {valid_files} image(s).")
 
-    if valid_files > 0:
-        st.sidebar.success(f"✅ {valid_files} images uploaded and sorted by label!")
-    else:
-        st.sidebar.error("❗ No valid files uploaded.")
-
-# Sidebar: Model and Epoch selection
+# Sidebar: Select framework and epochs
 framework = st.sidebar.selectbox("Choose Framework", ["PyTorch", "TensorFlow"])
 epochs = st.sidebar.slider("Epochs", 3, 30, 10)
 
-# Train PyTorch Model with Augmentation
-# ✅ PyTorch Model Training (Improved)
+# Sidebar: Upload Pretrained Model
+st.sidebar.markdown("---")
+st.sidebar.header("2. Import Pretrained Model")
+uploaded_model = st.sidebar.file_uploader("Upload a model (.pt or .h5)", type=["pt", "h5"])
+if uploaded_model:
+    model_path = os.path.join(MODEL_DIR, uploaded_model.name)
+    with open(model_path, "wb") as f:
+        f.write(uploaded_model.read())
+    if uploaded_model.name.endswith(".pt"):
+        PYTORCH_MODEL_PATH = model_path
+        st.sidebar.success("Using uploaded PyTorch model.")
+    elif uploaded_model.name.endswith(".h5"):
+        TF_MODEL_PATH = model_path
+        st.sidebar.success("Using uploaded TensorFlow model.")
+
+# Train PyTorch
 def train_pytorch_model():
     transform = transforms.Compose([
         transforms.RandomResizedCrop(224, scale=(0.9, 1.0)),
@@ -82,20 +79,15 @@ def train_pytorch_model():
         transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.3),
         transforms.RandomAffine(degrees=15, translate=(0.1, 0.1)),
         transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406],
-                             [0.229, 0.224, 0.225])
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
-
     dataset = datasets.ImageFolder(TRAIN_DIR, transform=transform)
     dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
     class_names = dataset.classes
 
     model = efficientnet_b0(pretrained=True)
-
-    # Fine-tune ALL layers
     for param in model.parameters():
         param.requires_grad = True
-
     model.classifier[1] = nn.Linear(model.classifier[1].in_features, len(class_names))
     model = model.to("cpu")
 
@@ -119,8 +111,7 @@ def train_pytorch_model():
     torch.save(model.state_dict(), PYTORCH_MODEL_PATH)
     return class_names
 
-# Train TensorFlow Model with Augmentation
-# ✅ TensorFlow Model Training (Improved)
+# Train TensorFlow
 def train_tf_model():
     datagen = ImageDataGenerator(
         preprocessing_function=preprocess_input,
@@ -134,15 +125,9 @@ def train_tf_model():
         fill_mode='nearest',
         validation_split=0.1
     )
-
     train_data = datagen.flow_from_directory(
-        TRAIN_DIR,
-        target_size=(224, 224),
-        batch_size=16,
-        class_mode='categorical',
-        subset='training'
+        TRAIN_DIR, target_size=(224, 224), batch_size=16, class_mode='categorical', subset='training'
     )
-
     class_names = list(train_data.class_indices.keys())
 
     base_model = MobileNetV2(weights='imagenet', include_top=False, input_tensor=Input(shape=(224, 224, 3)))
@@ -150,21 +135,17 @@ def train_tf_model():
     output = Dense(len(class_names), activation='softmax')(x)
     model = Model(inputs=base_model.input, outputs=output)
 
-    # ✅ Fine-tune all layers
     for layer in base_model.layers:
         layer.trainable = True
 
-    model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=0.0003),
-        loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.1),
-        metrics=['accuracy']
-    )
-
+    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0003),
+                  loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.1),
+                  metrics=['accuracy'])
     model.fit(train_data, epochs=epochs, verbose=1)
     model.save(TF_MODEL_PATH)
     return class_names
 
-# Train button
+# Train model
 if st.sidebar.button("🔧 Train Model"):
     if not os.listdir(TRAIN_DIR):
         st.sidebar.warning("Please upload training images.")
@@ -175,10 +156,22 @@ if st.sidebar.button("🔧 Train Model"):
             class_labels = train_tf_model()
         st.sidebar.success("✅ Model trained!")
 
-# Section 2: Upload test image
+# Always-show model download buttons
+st.sidebar.markdown("---")
+st.sidebar.header("3. Export Trained Model")
+
+if framework == "PyTorch" and os.path.exists(PYTORCH_MODEL_PATH):
+    with open(PYTORCH_MODEL_PATH, "rb") as f:
+        st.sidebar.download_button("⬇️ Download PyTorch Model", f, file_name="model.pt")
+elif framework == "TensorFlow" and os.path.exists(TF_MODEL_PATH):
+    with open(TF_MODEL_PATH, "rb") as f:
+        st.sidebar.download_button("⬇️ Download TensorFlow Model", f, file_name="model.h5")
+else:
+    st.sidebar.info("Train or upload a model to download it.")
+
+# Upload test image
 st.header("Upload Test Image")
 test_img = st.file_uploader("Upload a test image", type=["jpg", "jpeg", "png"])
-
 if test_img:
     image = Image.open(test_img).convert("RGB")
     st.image(image, caption="Uploaded Image", use_column_width=True)
@@ -187,8 +180,7 @@ if test_img:
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406],
-                                 [0.229, 0.224, 0.225])
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
         img_tensor = transform(image).unsqueeze(0)
         dataset = datasets.ImageFolder(TRAIN_DIR, transform=transform)
@@ -204,7 +196,6 @@ if test_img:
             probs = torch.nn.functional.softmax(outputs[0], dim=0)
             conf, pred = torch.max(probs, dim=0)
             label = class_labels[pred.item()]
-            conf_value = conf.item()
 
     elif framework == "TensorFlow" and os.path.exists(TF_MODEL_PATH):
         tf_img = image.resize((224, 224))
@@ -216,17 +207,14 @@ if test_img:
         class_labels = list(dataset.class_indices.keys())
 
         preds = model.predict(tf_arr)[0]
-        conf_value = float(np.max(preds))
         label = class_labels[int(np.argmax(preds))]
 
     else:
-        st.error("❗ Please train the selected model first.")
-        label, conf_value = "Error", 0.0
+        st.error("❗ Please train or import a model first.")
+        label = "Error"
 
     st.subheader("📊 Prediction Result")
-    st.json({
-        "predicted_class": label
-    })
+    st.json({"predicted_class": label})
 
 # Clear all
 if st.sidebar.button("🗑️ Clear All Data"):
