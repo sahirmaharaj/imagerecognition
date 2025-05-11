@@ -31,7 +31,7 @@ for path in [TRAIN_DIR, TEST_DIR, MODEL_DIR]:
 st.title("🧠 Image Classifier with Advanced Augmentation")
 
 # Sidebar: Upload Training Images
-st.sidebar.header("1. Upload Training Images (e.g., Apple_1.jpg, Banana_2.jpg)")
+st.sidebar.header("Image Classifier with Advanced Augmentation")
 files = st.sidebar.file_uploader("Upload training images", accept_multiple_files=True, type=["jpg", "jpeg", "png"])
 if files:
     for file in files:
