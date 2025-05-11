@@ -150,7 +150,7 @@ if st.sidebar.button("🔧 Train Model"):
         st.sidebar.success("✅ Model trained!")
 
 # Section 2: Upload test image
-st.header("2. Upload Test Image")
+st.header("Upload Test Image")
 test_img = st.file_uploader("Upload a test image", type=["jpg", "jpeg", "png"])
 
 if test_img:
